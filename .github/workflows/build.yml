@@ -55,7 +55,7 @@ jobs:
     # Build
     - name: Build executable
       run: |
-        nimble build --verbose
+        nimble build --verbose -Y
         ./fasta2lmdb -h
 
     - name: "Build and Copy release binary"
