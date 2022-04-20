@@ -5,13 +5,13 @@ import logging
 
 import bytesequtils
 import cligen
+import lmdb
 import zstd/compress
 import zstd/decompress
-import lmdb
 # import from lib/klib.nim; must compile with -p:./lib
 import klib
 
-let VERSION = "0.2.0"
+let VERSION = "0.2.1"
 let INFO_DB_NAME = "info"
 let logger = newConsoleLogger(fmtStr="[$time] - $levelname: ", useStderr=true)
 
@@ -108,13 +108,13 @@ proc getZstdDict(dbenv: LMDBEnv): string =
   try:
     return txn.get(dbi, "zstd_dictionary")
   except Exception as ex:
-    stderr.writeLine(fmt"Could not write dict to LMDB. Error: {ex.msg} ({ex.name})")
-    raise ex
+    stderr.writeLine(fmt"No Zstd dict could be read from LMDB. Error: {ex.msg} ({ex.name})")
+    return ""
   finally:
     txn.abort()
     dbenv.close(dbi)
 
-proc getSeq(dbenv: LMDBEnv, seqid: string, dict: string): string =
+proc getSeq(dbenv: LMDBEnv, seqid: string, dict: string = ""): string =
   let txn = dbenv.newTxn()
   let dbi = txn.dbiOpen("", 0)
   try:
@@ -206,7 +206,7 @@ proc toLMDB(
       dbenv.envClose()
       dbenv = newLMDBEnv(dbpath, openflags=MAPASYNC or NOSYNC, maxdbs=10)
       discard envSetMapsize(dbenv, mapSize)
-      
+  # end while
   threadpool.sync()
   dbenv.envClose()
   logger.log(lvlInfo, fmt"Read {count} records!")
@@ -224,6 +224,8 @@ proc fasta2lmdb(
   ## Expected usage to create an LMDB DB from a FASTA piped into fasta2lmdb:
   ##
   ## $ pixz -d < sequences_fasta_YYYY_mm_dd.tar.xz | tar -xOf - sequences.fasta | fasta2lmdb --dbpath ./gisaidseqs
+  ##
+  ## NOTE: train a Zstd dictionary on your sequences for better and faster compression and decompression of your sequences!
   ##
   ## Expected usage to retrieve sequences from LMDB DB to stdout:
   ##

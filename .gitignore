@@ -110,3 +110,7 @@ ENV/
 .~lock*#
 
 
+nimbledeps/
+zstd_dictionary
+sars-cov-2-zstd-dictionary
+fasta2lmdb
