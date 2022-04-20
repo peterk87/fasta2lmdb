@@ -2,76 +2,6 @@ import os, algorithm
 
 const klibVer* = "0.1"
 
-###################################
-# Unix getopt() and getopt_long() #
-###################################
-
-proc getArgv*(): seq[string] =
-  for i in 1 .. paramCount():
-    result.add(paramStr(i))
-
-iterator getopt*(argv: var seq[string], ostr: string, longopts: seq[
-    string] = @[]): (string, string) =
-  var
-    pos = 0
-    cur = 0
-  while cur < argv.len:
-    var
-      lopt = "" # long option
-      opt = '?' # short option
-      arg = ""  # option argument
-    while cur < argv.len: # look for an option
-      if argv[cur][0] == '-' and argv[cur].len > 1: # an option or "--"
-        if argv[cur].len == 2 and argv[cur][1] == '-': # "--"
-          cur = argv.len
-        break
-      else: cur += 1
-    if cur == argv.len: break
-    let a = argv[cur]
-    if a[0..1] == "--": # long option
-      pos = -1
-      var
-        pos_eq = find(a, '=')
-        o = a[2 ..< a.len]
-        c = 0
-        k = -1
-        tmp = ""
-      if pos_eq > 0:
-        o = a[2 ..< pos_eq]
-        arg = a[pos_eq+1 ..< a.len]
-      for i, x in longopts: # look for matching long options
-        var y = x
-        if y[^1] == '=': y = y[0 ..< y.len-1]
-        if o.len <= y.len and o == y[0 ..< o.len]: # prefix match
-          k = i; c += 1; tmp = y
-          if o == y: # exact option match
-            c = 1
-            break
-      if c == 1: # find a unique match
-        lopt = tmp
-        if pos_eq < 0 and longopts[k][^1] == '=' and cur + 1 < argv.len:
-          arg = argv[cur + 1]
-          argv.delete(cur + 1)
-    else: # short option
-      if pos == 0: pos = 1
-      opt = a[pos]
-      pos += 1
-      var k = find(ostr, opt)
-      if k < 0: opt = '?'
-      elif k + 1 < ostr.len and ostr[k + 1] == ':': # requiring an argument
-        if pos >= a.len:
-          if cur + 1 < argv.len:
-            arg = argv[cur + 1]
-            argv.delete(cur + 1)
-        else:
-          arg = a[pos ..< a.len]
-        pos = -1
-    if pos < 0 or pos >= argv[cur].len:
-      argv.delete(cur)
-      pos = 0
-    if lopt != "": yield ("--" & lopt, arg)
-    else: yield ("-" & opt, arg)
-
 #################
 # gzip file I/O #
 #################
@@ -80,10 +10,8 @@ when defined(windows):
   const libz = "zlib1.dll"
 elif defined(macosx):
   const libz = "libz.dylib"
-  const libc = "libc.dylib"
 else:
   const libz = "libz.so.1"
-  const libc = "libc.so.6"
 
 type
   gzFile = pointer
@@ -181,8 +109,8 @@ proc read*[T](f: var Bufio[T], buf: var string, sz: int,
   f.st += rest
   return off + rest - offset
 
-proc memchr(buf: pointer, c: cint, sz: csize_t): pointer {.cdecl, dynlib: libc,
-    importc: "memchr".}
+proc memchr(buf: pointer, c: cint, sz: csize_t): pointer 
+  {.importc: "memchr", header: "<string.h>".}
 
 proc readUntil*[T](f: var Bufio[T], buf: var string, dret: var char,
     delim: int = -1, offset: int = 0): int {.discardable.} =
@@ -275,72 +203,3 @@ proc readFastx*[T](f: var Bufio[T], r: var FastxRecord): bool {.discardable.} =
   r.lastChar = 0
   if r.seq.len != r.qual.len: r.status = -4; return false
   return true
-
-#############
-# Intervals #
-#############
-
-type
-  Interval*[S,T] = tuple[st, en: S, data: T, max: S]
-
-proc sort*[S,T](a: var seq[Interval[S,T]]) =
-  a.sort do (x, y: Interval[S,T]) -> int:
-    if x.st < y.st: -1
-    elif x.st > y.st: 1
-    else: 0
-
-proc index*[S,T](a: var seq[Interval[S,T]]): int {.discardable.} =
-  if a.len == 0: return 0
-  var is_srt = true
-  for i in 1..<a.len:
-    if a[i-1].st > a[i].st:
-      is_srt = false; break
-  if not is_srt: a.sort()
-  var last_i: int
-  var last: S
-  for i in countup(0, a.len-1, 2): # leaves (i.e. at level 0)
-    (last_i, last, a[i].max) = (i, a[i].en, a[i].en)
-  var k = 1
-  while 1 shl k <= a.len: # process internal nodes in the bottom-up order
-    let x = 1 shl (k - 1)
-    let i0 = (x shl 1) - 1 # the first node at level k
-    let step = x shl 2
-    for i in countup(i0, a.len - 1, step): # traverse nodes at level k
-      let el = a[i - x].max  # max value of the left child
-      let er = if i + x < a.len: a[i + x].max else: last # of the right child
-      var e = a[i].en
-      if e < el: e = el
-      if e < er: e = er
-      a[i].max = e
-    # point last_i to the parent of the original last_i
-    last_i = if ((last_i shr k) and 1) != 0: last_i - x else: last_i + x
-    if last_i < a.len and a[last_i].max > last: # update last accordingly
-      last = a[last_i].max
-    k += 1
-  return k - 1
-
-iterator overlap*[S,T](a: seq[Interval[S,T]], st: S, en: S): Interval[S,T] {.noSideEffect.} =
-  var h: int = 0
-  while 1 shl h <= a.len: h += 1
-  h -= 1 # h is the height of the tree
-  var stack: array[64, tuple[k, x, w:int]] # 64 is the max possible tree height
-  var t: int = 0
-  stack[t] = (h, (1 shl h) - 1, 0); t += 1 # push the root
-  while t > 0: # the following guarantees sorted "yield"
-    t -= 1
-    let (k, x, w) = stack[t] # pop from the stack
-    if k <= 3: # in a small subtree, traverse everything
-      let i0 = (x shr k) shl k
-      var i1 = i0 + (1 shl (k + 1)) - 1
-      if i1 >= a.len: i1 = a.len
-      for i in countup(i0, i1 - 1):
-        if a[i].st >= en: break  # out of range; no need to proceed
-        if st < a[i].en: yield a[i] # overlap! yield
-    elif w == 0: # the left child not processed
-      let y = x - (1 shl (k - 1)) # the left child of z.x; y may >=a.len
-      stack[t] = (k, x, 1); t += 1
-      if y >= a.len or a[y].max > st:
-        stack[t] = (k-1, y, 0); t += 1 # add left child
-    elif x < a.len and a[x].st < en: # need to push the right child
-      if st < a[x].en: yield a[x] # test if x overlaps the query
-      stack[t] = (k - 1, x + (1 shl (k - 1)), 0); t += 1

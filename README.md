@@ -10,12 +10,48 @@ To address this sequence retrieval bottleneck, `fasta2lmdb` was developed in the
 
 ## Install
 
+### Download Linux binary
+
+Download the pre-compiled Linux binary under the [latest release](https://github.com/peterk87/fasta2lmdb/releases/) and put it somewhere on your `PATH`.
+
+### Compile from source
+
+If you have [Nim] and [Nimble] installed, clone the repo and use [Nimble] to get the [Nim] dependencies and compile `fasta2lmdb`:
+
 ```bash
 git clone https://github.com/peterk87/fasta2lmdb.git
 cd fasta2lmdb
-make
-./fasta2lmdb --help
+nimble build --verbose
+./fasta2lmdb -h
 ```
+
+#### Compile statically linked binary from source
+
+[LMDB] will need to be compiled from source to create a `liblmdb.a` file necessary for static linking.
+
+Download, build and install the latest version of LMDB:
+
+```bash
+curl -SLk https://github.com/LMDB/lmdb/archive/refs/tags/LMDB_0.9.29.tar.gz | tar -xzf -
+cd lmdb-LMDB_0.9.29/libraries/liblmdb/
+make
+sudo make install
+[[ -f "/usr/local/lib/liblmdb.a" ]] || (echo "'/usr/local/lib/liblmdb.a' does not exist! Static compilation may not work." && false)
+```
+
+To compile a portable binary with static linking of dependencies with optional stripping of unnecessary symbols and [UPX](https://github.com/upx/upx) binary compression:
+
+```bash
+nimble build -d:static --verbose
+# optional strip unnecessary symbols from binary and compress with UPX
+strip -s ./fasta2lmdb
+upx --best ./fasta2lmdb
+```
+
+**References**
+
+- [Nim: Deploying static binaries](https://scripter.co/nim-deploying-static-binaries/)
+
 
 ## Usage
 
@@ -40,7 +76,7 @@ Retrieve sequences from LMDB
 $ ./fasta2lmdb --dbpath /path/to/gisaidlmdb --seqids seqids.txt > seqs.fasta
 ```
 
-- **NOTE:** if the sequences are compressed with a Zstd dictionary, the dictionary will be retrieved from the LMDB `info` DB and used to decompress the sequences. Compression with a Zstd dictionary is *highly* recommended since it cuts the LMDB size drastically (e.g. 26 GB to 5.4 GB for the GISAID SARS-CoV-2 sequences from 2022-03-17).
+- **NOTE:** if the sequences are compressed with a Zstd dictionary, the dictionary will be retrieved from the LMDB `info` DB and used to decompress the sequences. Compression with a Zstd dictionary is *highly* recommended since it cuts the LMDB size drastically (e.g. around 100 GB without a Zstd dictionary to only 4-5 GB with a dictionary for the GISAID SARS-CoV-2 sequences from 2022-03-17 *or* from around 9000 bytes Zstd compressed without a dictionary to only 300-500 bytes with a dictionary per SARS-CoV-2 sequence).
 
 ### Recommended Usage with GISAID sequences_fasta_YYYY_mm_dd.tar.xz
 
@@ -107,8 +143,6 @@ For all SARS-CoV-2 sequences downloaded on 2022-03-17 from GISAID (as a `tar.xz`
 
 #### LMDB with ZStandard Dictionary from GISAID SARS-CoV-2
 
-
-
 ```bash
 $ pixz -d < sequences_fasta_2022_03_17.tar.xz \
   | tar -xOf - sequences.fasta \
@@ -135,6 +169,7 @@ $ tree -h
 └── [8.0K]  lock.mdb
 ```
 
+- **NOTE:** Size of database may vary depending on how Zstd dictionary training goes, but the size of the LMDB should be a fraction of the size without a dictionary.
 
 ## Performance
 
@@ -268,6 +303,10 @@ print(header_seq[seqid])
 
 ## Changelog
 
+### 0.2.1 [2022-04-20]
+
+Fixed static compilation of `fasta2lmdb` for a more portable binary.
+
 ### 0.2.0 [2022-04-14]
 
 Added
@@ -288,6 +327,7 @@ Initial alpha release.
 [zstandard]: https://github.com/indygreg/python-zstandard
 [BioPython]: https://biopython.org/
 [Nim]: https://nim-lang.org/
+[Nimble]: https://github.com/nim-lang/nimble
 [LZMA]: https://tukaani.org/xz/
 [pixz]: https://github.com/vasi/pixz
 [pv]: http://www.ivarch.com/programs/pv.shtml
