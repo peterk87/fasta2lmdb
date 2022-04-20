@@ -1,5 +1,7 @@
 # fasta2lmdb
 
+[![Build](https://github.com/peterk87/fasta2lmdb/actions/workflows/build.yml/badge.svg)](https://github.com/peterk87/fasta2lmdb/actions/workflows/build.yml)
+
 Quickly save FASTA sequences to an LMDB key-value database for extremely rapid retrieval (get 100k SARS-CoV-2 sequences from a `fasta2lmdb` DB in less than 5 seconds!). Compress sequences with [Zstd] for a DB less than twice as large as a `.tar.xz` (if you train a Zstd dictionary on your sequences)!
 
 ## Rationale
