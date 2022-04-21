@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.2.1"
+version       = "0.2.2"
 author        = "Peter Kruczkiewicz"
 description   = "Quickly save FASTA sequences to an LMDB key-value database for rapid retrieval."
 license       = "Apache-2.0"

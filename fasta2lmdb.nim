@@ -11,7 +11,7 @@ import zstd/decompress
 # import from lib/klib.nim; must compile with -p:./lib
 import klib
 
-let VERSION = "0.2.1"
+let VERSION = "0.2.2"
 let INFO_DB_NAME = "info"
 let logger = newConsoleLogger(fmtStr="[$time] - $levelname: ", useStderr=true)
 
@@ -41,10 +41,16 @@ proc compressSeq(
   return s
 
 proc getHeader(name: string, comment: string): string =
-  var header = name & " " & comment
-  header = header.split('|', maxsplit=1)[0]
-  header = header.replace(' ', '_')
-  header = header.replace("hCoV-19/", "")
+  var header: string = ""
+  if comment != "":
+    header = name & " " & comment
+  else:
+    header = name
+  # special case for GISAID SARS-CoV-2 sequences
+  if header.startswith("hCoV-19/"):
+    header = header.replace("hCoV-19/", "")
+    header = header.split('|', maxsplit=1)[0]
+    header = header.replace(' ', '_')
   return header
 
 proc putSeq(dbenv: LMDBEnv, header: string, s: string) =
@@ -114,19 +120,34 @@ proc getZstdDict(dbenv: LMDBEnv): string =
     txn.abort()
     dbenv.close(dbi)
 
-proc getSeq(dbenv: LMDBEnv, seqid: string, dict: string = ""): string =
+proc areSeqsCompressed(dbenv: LMDBEnv): bool =
+  let txn = dbenv.newTxn()
+  let dbi = txn.dbiOpen(INFO_DB_NAME, 0)
+  try:
+    return txn.get(dbi, "is_compressed") == "true"
+  except Exception as ex:
+    stderr.writeLine(fmt"No Zstd dict could be read from LMDB. Error: {ex.msg} ({ex.name})")
+    return false
+  finally:
+    txn.abort()
+    dbenv.close(dbi)
+
+proc getSeq(dbenv: LMDBEnv, seqid: string, dict: string = "", isCompressed: bool = true): string =
   let txn = dbenv.newTxn()
   let dbi = txn.dbiOpen("", 0)
   try:
-    var compressedSeq = txn.get(dbi, seqid)
-    var dctx = new_decompress_context()
-    var decompressedSeq: seq[byte]
-    if dict != "":
-      decompressedSeq = decompress(dctx, compressedSeq, dict=dict)
+    if isCompressed:
+      var compressedSeq = txn.get(dbi, seqid)
+      var dctx = new_decompress_context()
+      var decompressedSeq: seq[byte]
+      if dict != "":
+        decompressedSeq = decompress(dctx, compressedSeq, dict=dict)
+      else:
+        decompressedSeq = decompress(dctx, compressedSeq)
+      discard free_context(dctx)
+      return toStrBuf(decompressedSeq)
     else:
-      decompressedSeq = decompress(dctx, compressedSeq)
-    discard free_context(dctx)
-    return toStrBuf(decompressedSeq)
+      return txn.get(dbi, seqid)
   except Exception as ex:
     stderr.writeLine(fmt"Could not get sequence for '{seqid}' from LMDB. Error: {ex.msg}")
     return ""
@@ -135,11 +156,12 @@ proc getSeq(dbenv: LMDBEnv, seqid: string, dict: string = ""): string =
     dbenv.close(dbi)
 
 proc writeFastaSeqToStdout(seqid: string, sequence: string) =
-  stdout.writeLine(fmt">{seqid}")
-  stdout.writeLine(sequence)
+  if sequence != "":
+    stdout.writeLine(fmt">{seqid}")
+    stdout.writeLine(sequence)
 
-proc getLMDBSeqWriteToStdout(dbenv: LMDBEnv, seqid: string, dict: string) =
-  writeFastaSeqToStdout(seqid, getSeq(dbenv, seqid, dict))
+proc getLMDBSeqWriteToStdout(dbenv: LMDBEnv, seqid: string, dict: string, isCompressed: bool = true) =
+  writeFastaSeqToStdout(seqid, getSeq(dbenv, seqid, dict, isCompressed))
 
 proc toLMDB(
     dbpath: string, 
@@ -240,10 +262,11 @@ proc fasta2lmdb(
     logger.log(lvlInfo, fmt"Start fetch sequences from LMDB '{dbpath}' with IDs in '{seqids}'")
     let dbenv = newLMDBEnv(dbpath, maxdbs=10)
     let dict = getZstdDict(dbenv)
+    let compressed = areSeqsCompressed(dbenv)
     for line in seqids.lines:
       if line == "":
         continue
-      getLMDBSeqWriteToStdout(dbenv, line, dict)
+      getLMDBSeqWriteToStdout(dbenv, line, dict, compressed)
     dbenv.envClose()
     logger.log(lvlInfo, "DONE!")
 

@@ -45,7 +45,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get -qy install make build-essential curl libtool autoconf zlib1g-dev liblmdb-dev
+        sudo apt-get -qy install make build-essential curl libtool autoconf zlib1g-dev liblmdb-dev gzip zstd grep
 
     # Install Nim and Nimble
     - uses: iffy/install-nim@v4.1.1
@@ -57,6 +57,24 @@ jobs:
       run: |
         nimble build --verbose -Y
         ./fasta2lmdb -h
+    # Install Python dependencies
+    - name: Install Python dependencies for Zstd dictionary training tool
+      run: |
+        pip install typer rich
+    # Test
+    - name: Test with NCBI influenza seq data
+      run: |
+        curl -SL https://ftp.ncbi.nih.gov/genomes/INFLUENZA/influenza.fna.gz -o influenza.fna.gz
+        # train zstd dictionary from 10000 sequences
+        zcat influenza.fna.gz | python ./train_zstd_dictionary_fasta_seqs.py --n-seqs 10000
+        # create LMDB with zstd with dict compression of sequences
+        zcat influenza.fna.gz | ./fasta2lmdb --dbpath flulmdb --zstdDict zstd_dictionary
+        # get first 1000 seqids from fasta
+        zcat influenza.fna.gz | grep '^>' | head -n1000 | sed 's/^>//' > seqids.txt
+        # test seq retrieval
+        ./fasta2lmdb --dbpath flulmdb --seqids seqids.txt > out.fasta
+        N=$(grep -c '^>')
+        [[ 1000 -eq $N ]] || echo "Expected 1000 entries in out.fasta, but only found $N"
 
     - name: "Build and Copy release binary"
       run: nim c -d:release -o:bin/fasta2lmdb_${{ matrix.os }} fasta2lmdb

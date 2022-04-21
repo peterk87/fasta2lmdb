@@ -305,6 +305,14 @@ print(header_seq[seqid])
 
 ## Changelog
 
+### 0.2.2 [2022-04-21]
+
+- Fixed issue with outputting sequences to FASTA when no compression was used
+- Fixed `getHeader` so that the `hCoV-19/` prefix is removed and whitespace replaced with underscores only in GISAID SARS-CoV-2 sequences.
+- Remove unnecessary Makefile. `$ nimble build` recommended instead
+- Updated CI `build.yml` to include real world data test with NCBI influenza sequences
+
+
 ### 0.2.1 [2022-04-20]
 
 Fixed static compilation of `fasta2lmdb` for a more portable binary.
