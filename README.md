@@ -2,7 +2,7 @@
 
 [![Build](https://github.com/peterk87/fasta2lmdb/actions/workflows/build.yml/badge.svg)](https://github.com/peterk87/fasta2lmdb/actions/workflows/build.yml)
 
-Quickly save FASTA sequences to an LMDB key-value database for extremely rapid retrieval (get 100k SARS-CoV-2 sequences from a `fasta2lmdb` DB in less than 5 seconds!). Compress sequences with [Zstd] for a DB less than twice as large as a `.tar.xz` (if you train a Zstd dictionary on your sequences)!
+Quickly save FASTA sequences to an [LMDB] key-value database for extremely rapid retrieval (get 100k SARS-CoV-2 sequences from a `fasta2lmdb` DB in less than 5 seconds!). Compress sequences with [Zstd] for a DB less than twice as large as a `.tar.xz` (if you train a Zstd dictionary on your sequences)!
 
 ## Rationale
 
@@ -63,29 +63,74 @@ You can either create an LMDB DB from FASTA sequences piped into `fasta2lmdb` or
 Sequences must be piped into `fasta2lmdb` as stdin, e.g.
 
 ```bash
-$ xzcat sequences.fasta.xz | ./fasta2lmdb --dbpath /path/to/seqs_lmdb
+xzcat sequences.fasta.xz | ./fasta2lmdb intoLMDB --dbpath /path/to/seqs_lmdb
 ```
 
-GISAID SARS-CoV-2 `sequences_fasta_YYYY_mm_dd.tar.xz` into an LMDB DB
+GISAID SARS-CoV-2 `sequences_fasta_YYYY_mm_dd.tar.xz` into an LMDB DB:
 
 ```bash
-$ pixz -d < /path/to/sequences_fasta_2022_03_17.tar.xz | tar -xOf - sequences.fasta | pv -cN pixztar | ./fasta2lmdb --dbpath ./gisaidlmdb
+pixz -d < /path/to/sequences_fasta_2022_03_17.tar.xz | tar -xOf - sequences.fasta | pv -cN pixztar | ./fasta2lmdb intoLMDB --dbpath ./gisaidlmdb
 ```
 
-Retrieve sequences from LMDB
+Retrieve sequences from a `fasta2lmdb` created LMDB with the `fromLMDB` subcommand:
 
 ```bash
-$ ./fasta2lmdb --dbpath /path/to/gisaidlmdb --seqids seqids.txt > seqs.fasta
+./fasta2lmdb fromLMDB --dbpath /path/to/seqs_lmdb --seqids seqids.txt > seqs.fasta
 ```
 
 - **NOTE:** if the sequences are compressed with a Zstd dictionary, the dictionary will be retrieved from the LMDB `info` DB and used to decompress the sequences. Compression with a Zstd dictionary is *highly* recommended since it cuts the LMDB size drastically (e.g. around 100 GB without a Zstd dictionary to only 4-5 GB with a dictionary for the GISAID SARS-CoV-2 sequences from 2022-03-17 *or* from around 9000 bytes Zstd compressed without a dictionary to only 300-500 bytes with a dictionary per SARS-CoV-2 sequence).
+
+### Show help info
+
+Show comprehensive help info with `$ ./fasta2lmdb help`:
+
+```
+This is a multiple-dispatch command.  -h/--help/--help-syntax is available
+for top-level/all subcommands.  Usage is like:
+    fasta2lmdb {SUBCMD} [subcommand-opts & args]
+where subcommand syntaxes are as follows:
+
+  intoLMDB [optional-params]
+    Read FASTA records from stdin into LMDB key-value database
+
+    Example usage to create an LMDB DB from GISAID SARS-CoV-2 FASTA sequences piped into fasta2lmdb:
+
+    $ pixz -d < sequences_fasta_YYYY_mm_dd.tar.xz | tar -xOf - sequences.fasta | fasta2lmdb intoLMDB --dbpath
+    ./gisaidseqslmdb --zstdDict sars-cov-2-zstd-dictionary
+
+    NOTE: train a Zstd dictionary on your sequences for better and faster compression and decompression of your
+    sequences!
+  Options:
+      --version           bool    false         print version
+      -d=, --dbpath=      string  "./seqslmdb"  Path to LMDB. If does not exist, it will be created. If it does exist,
+                                                new sequences will be saved to it.
+      -m=, --mapSize=     uint    10737418240   Max LMDB size. Default to 10GB. May need to be adjusted depending on
+                                                size of input and whether the sequences will be compressed or not.
+      -o, --overwriteDB   bool    false         Overwrite LMDB?  This will delete any existing LMDB.
+      -z=, --zstdDict=    string  ""            Path to Zstd dictionary file trained on similar sequences. A Zstd is
+                                                highly recommended for better and faster compression and decompression.
+      -c, --compressSeqs  bool    true          Compress sequences saved to LMDB?
+
+  fromLMDB [REQUIRED,optional-params]
+    Get sequences from LMDB created by fasta2lmdb
+
+    Expected usage to retrieve sequences from LMDB DB to stdout:
+
+    $ fasta2lmdb fromLMDB --dbpath /path/to/gisaidseqs --seqids seqids.txt > seqs.fasta
+
+    where "seqids.txt" contains sequence IDs to retrieve; one per line
+  Options:
+      --version       bool    false     print version
+      -d=, --dbpath=  string  REQUIRED  Path to LMDB created with fasta2lmdb
+      -s=, --seqids=  string  ""        File with list of sequence IDs to retrieve from LMDB
+```
 
 ### Recommended Usage with GISAID sequences_fasta_YYYY_mm_dd.tar.xz
 
 It is highly recommended that you train a Zstd dictionary on your input sequences before creating an LMDB with `fasta2lmdb`. You can use the `train_zstd_dictionary_fasta_seqs.py` script to train a dictionary: 
 
 ```bash
-$ pixz -d < /path/to/gisaid/sequences_fasta_2022_03_17.tar.xz | tar -xOf - sequences.fasta | python train_zstd_dictionary_fasta_seqs.py --n-seqs 1000
+pixz -d < /path/to/gisaid/sequences_fasta_2022_03_17.tar.xz | tar -xOf - sequences.fasta | python train_zstd_dictionary_fasta_seqs.py --n-seqs 1000
 ```
 
 You should see the following terminal output and a `zstd_dictionary` file should be created:
@@ -111,7 +156,7 @@ Save dictionary of size 112640 into file /path/to/zstd_dictionary
 Given a `sequences_fasta_YYYY_mm_dd.tar.xz` file from GISAID containing SARS-CoV-2 sequences, decompress the `tar.xz` file with [pixz] for rapid multithreaded decompression, piping stdout into `tar` to extract `sequences.fasta` and, optionally, piping into [pv] to watch progress/bandwidth, and finally piping into `fasta2lmdb` to write the sequences to an [LMDB] at `./gisaidlmdb`:
 
 ```bash
-$ pixz -d < /path/to/sequences_fasta_2022_02_10.tar.xz | tar -xOf - sequences.fasta | pv -cN pixztar | ./fasta2lmdb --dbpath ./gisaidlmdb --zstddict zstd_dictionary
+$ pixz -d < /path/to/sequences_fasta_2022_02_10.tar.xz | tar -xOf - sequences.fasta | pv -cN pixztar | ./fasta2lmdb intoLMDB --dbpath ./gisaidlmdb --zstddict zstd_dictionary
 ```
 
 The following messages should appear in the terminal with progress tracked by `pv`:
@@ -130,7 +175,7 @@ The following messages should appear in the terminal with progress tracked by `p
 Add new sequences to an existing LMDB with
 
 ```bash
-$ pixz -d < /path/to/sequences_fasta_2022_04_14.tar.xz | tar -xOf - sequences.fasta | pv -cN pixztar | ./fasta2lmdb --dbpath ./gisaidlmdb
+$ pixz -d < /path/to/sequences_fasta_2022_04_14.tar.xz | tar -xOf - sequences.fasta | pv -cN pixztar | ./fasta2lmdb intoLMDB --dbpath ./gisaidlmdb
 ```
 
 - **NOTE:** Only new sequences with sequence IDs that do not exist in the DB will be added so this should be faster than creating a new DB. 
@@ -149,7 +194,7 @@ For all SARS-CoV-2 sequences downloaded on 2022-03-17 from GISAID (as a `tar.xz`
 $ pixz -d < sequences_fasta_2022_03_17.tar.xz \
   | tar -xOf - sequences.fasta \
   | pv -cN pixztar \
-  | ./fasta2lmdb --dbpath /path/to/gisaid-lmdb --zstdDict gisaid-zstd-dictionary
+  | ./fasta2lmdb intoLMDB --dbpath /path/to/gisaid-lmdb --zstdDict gisaid-zstd-dictionary
 ```
 
 ```
@@ -305,13 +350,15 @@ print(header_seq[seqid])
 
 ## Changelog
 
-### 0.2.2 [2022-04-21]
+### 0.3.0 [2022-04-21]
 
+- Added subcommands `intoLMDB` and `fromLMDB` to put sequences into an LMDB and get sequences from an LMDB, respectively.
 - Fixed issue with outputting sequences to FASTA when no compression was used
 - Fixed `getHeader` so that the `hCoV-19/` prefix is removed and whitespace replaced with underscores only in GISAID SARS-CoV-2 sequences.
 - Remove unnecessary Makefile. `$ nimble build` recommended instead
+- Improved CLI help info
 - Updated CI `build.yml` to include real world data test with NCBI influenza sequences
-
+- Fixed `--version` now outputs version properly.
 
 ### 0.2.1 [2022-04-20]
 

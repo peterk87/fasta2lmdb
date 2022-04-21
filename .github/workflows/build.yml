@@ -57,7 +57,7 @@ jobs:
     - name: Build executable
       run: |
         nimble build --verbose -Y
-        ./fasta2lmdb -h
+        ./fasta2lmdb help
     # Install Python dependencies
     - name: Install Python dependencies for Zstd dictionary training tool
       run: |
@@ -69,16 +69,19 @@ jobs:
     # Test
     - name: Test with NCBI influenza seq data
       run: |
-        # train zstd dictionary from 10000 sequences
+        echo "Train zstd dictionary from 10000 sequences"
         zcat influenza.fna.gz | python3 ./train_zstd_dictionary_fasta_seqs.py --n-seqs 10000
-        # create LMDB with zstd with dict compression of sequences
-        zcat influenza.fna.gz | sed -E 's/^>gi\|[0-9]+\|gb\|(\w+)\|(.*)/>\1/' | ./fasta2lmdb --dbpath flulmdb --zstdDict zstd_dictionary
-        # get first 1000 seqids from fasta
-        zcat influenza.fna.gz | grep '^>' | head -n1000 | sed -E 's/^>gi\|[0-9]+\|gb\|(\w+)\|(.*)/\1/' > seqids.txt
-        # test seq retrieval
-        ./fasta2lmdb --dbpath flulmdb --seqids seqids.txt > out.fasta
+        echo
+        echo "Create LMDB with zstd with dict compression of sequences"
+        zcat influenza.fna.gz | sed -E 's/^>gi\|[0-9]+\|gb\|(\w+)\|(.*)/>\1/' | ./fasta2lmdb intoLMDB --dbpath flulmdb --zstdDict zstd_dictionary
+        echo
+        NSEQS=1000
+        echo "Get first $NSEQS seqids from fasta"
+        zcat influenza.fna.gz | grep '^>' | head -n$NSEQS | sed -E 's/^>gi\|[0-9]+\|gb\|(\w+)\|(.*)/\1/' > seqids.txt
+        echo "Try get seqs in seqsids.txt from LMDB"
+        ./fasta2lmdb fromLMDB --dbpath ./flulmdb --seqids seqids.txt > out.fasta
         N=$(grep -c '^>')
-        [[ 1000 -eq $N ]] || (echo "Expected 1000 entries in out.fasta, but only found $N" && false)
+        ([[ 1000 -eq $N ]] && echo "Success!") || (echo "Expected 1000 entries in out.fasta, but only found $N" && false)
     - name: "Build and Copy release binary"
       run: nim c -d:release -o:bin/fasta2lmdb_${{ matrix.os }} fasta2lmdb
     - name: Upload Artifact
