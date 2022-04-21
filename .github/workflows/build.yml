@@ -84,7 +84,7 @@ jobs:
         ([[ 1000 -eq $N ]] && echo "Success!") || (echo "Expected 1000 entries in out.fasta, but only found $N" && false)
     - name: "Build and Copy release statically linked binary"
       run: |
-        nim c -d:static-ubuntu -o:bin/fasta2lmdb_${{ matrix.os }} fasta2lmdb
+        nim c -d:staticUbuntu -o:bin/fasta2lmdb_${{ matrix.os }} fasta2lmdb
         strip -s bin/fasta2lmdb_${{ matrix.os }}
         upx --best bin/fasta2lmdb_${{ matrix.os }}
     - name: Upload Artifact
