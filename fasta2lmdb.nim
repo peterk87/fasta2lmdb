@@ -154,13 +154,20 @@ proc getSeq(dbenv: LMDBEnv, seqid: string, dict: string = "", isCompressed: bool
     txn.abort()
     dbenv.close(dbi)
 
-proc writeFastaSeqToStdout(seqid: string, sequence: string) =
+proc writeFastaSeqToStdout(seqid: string, sequence: string): bool {.discardable.} =
   if sequence != "":
     stdout.writeLine(fmt">{seqid}")
     stdout.writeLine(sequence)
+    return true
+  return false
 
-proc getLMDBSeqWriteToStdout(dbenv: LMDBEnv, seqid: string, dict: string, isCompressed: bool = true) =
-  writeFastaSeqToStdout(seqid, getSeq(dbenv, seqid, dict, isCompressed))
+proc getLMDBSeqWriteToStdout(
+    dbenv: LMDBEnv,
+    seqid: string,
+    dict: string,
+    isCompressed: bool = true
+  ): bool {.discardable.} =
+  return writeFastaSeqToStdout(seqid, getSeq(dbenv, seqid, dict, isCompressed))
 
 proc toLMDB(
     dbpath: string, 
@@ -266,10 +273,13 @@ proc fromLMDB(
   let dbenv = newLMDBEnv(dbpath, maxdbs=10)
   let dict = getZstdDict(dbenv)
   let compressed = areSeqsCompressed(dbenv)
+  var count: int = 0
   for line in seqids.lines:
     if line == "":
       continue
-    getLMDBSeqWriteToStdout(dbenv, line, dict, compressed)
+    if getLMDBSeqWriteToStdout(dbenv, line, dict, compressed):
+      count += 1
+  logger.log(lvlInfo, fmt"Wrote {count} sequences to stdout.")
   dbenv.envClose()
   logger.log(lvlInfo, "DONE!")
 
