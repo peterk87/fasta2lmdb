@@ -13,7 +13,7 @@ from rich.logging import RichHandler
 
 def init_logging(verbose: bool) -> None:
     from rich.traceback import install
-    console = Console(stderr=True)
+    console = Console(stderr=True, width=200)
     install(show_locals=True, word_wrap=True, console=console)
     logging.basicConfig(
         format="%(message)s",
