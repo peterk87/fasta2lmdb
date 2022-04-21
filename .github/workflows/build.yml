@@ -48,7 +48,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get -qy install make build-essential curl libtool autoconf zlib1g-dev liblmdb-dev gzip zstd grep
+        sudo apt-get -qy install make build-essential curl libtool autoconf zlib1g-dev liblmdb-dev gzip zstd grep upx binutils
     # Install Nim and Nimble
     - uses: iffy/install-nim@v4.1.1
       with:
@@ -82,8 +82,11 @@ jobs:
         ./fasta2lmdb fromLMDB --dbpath ./flulmdb --seqids seqids.txt > out.fasta
         N=$(grep -c '^>' out.fasta)
         ([[ 1000 -eq $N ]] && echo "Success!") || (echo "Expected 1000 entries in out.fasta, but only found $N" && false)
-    - name: "Build and Copy release binary"
-      run: nim c -d:release -o:bin/fasta2lmdb_${{ matrix.os }} fasta2lmdb
+    - name: "Build and Copy release statically linked binary"
+      run: |
+        nim c -d:static-ubuntu -o:bin/fasta2lmdb_${{ matrix.os }} fasta2lmdb
+        strip -s bin/fasta2lmdb_${{ matrix.os }}
+        upx --best bin/fasta2lmdb_${{ matrix.os }}
     - name: Upload Artifact
       if: success()
       uses: actions/upload-artifact@v1.0.0
