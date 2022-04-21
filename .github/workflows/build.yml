@@ -72,13 +72,13 @@ jobs:
         # train zstd dictionary from 10000 sequences
         zcat influenza.fna.gz | python3 ./train_zstd_dictionary_fasta_seqs.py --n-seqs 10000
         # create LMDB with zstd with dict compression of sequences
-        zcat influenza.fna.gz | ./fasta2lmdb --dbpath flulmdb --zstdDict zstd_dictionary
+        zcat influenza.fna.gz | sed -E 's/^>gi\|[0-9]+\|gb\|(\w+)\|(.*)/>\1/' | ./fasta2lmdb --dbpath flulmdb --zstdDict zstd_dictionary
         # get first 1000 seqids from fasta
-        zcat influenza.fna.gz | grep '^>' | head -n1000 | sed 's/^>//' > seqids.txt
+        zcat influenza.fna.gz | grep '^>' | head -n1000 | sed -E 's/^>gi\|[0-9]+\|gb\|(\w+)\|(.*)/\1/' > seqids.txt
         # test seq retrieval
         ./fasta2lmdb --dbpath flulmdb --seqids seqids.txt > out.fasta
         N=$(grep -c '^>')
-        [[ 1000 -eq $N ]] || echo "Expected 1000 entries in out.fasta, but only found $N"
+        [[ 1000 -eq $N ]] || (echo "Expected 1000 entries in out.fasta, but only found $N" && false)
     - name: "Build and Copy release binary"
       run: nim c -d:release -o:bin/fasta2lmdb_${{ matrix.os }} fasta2lmdb
     - name: Upload Artifact
