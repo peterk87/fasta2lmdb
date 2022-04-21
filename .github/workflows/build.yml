@@ -33,12 +33,12 @@ jobs:
         path: ~/.nimble
         key: ${{ runner.os }}-nimble-stable
 
-    - name: Cache LMDB
-      id: cache-lmdb
+    - name: Cache influenza.fna.gz
+      id: cache-influenza-fna
       uses: actions/cache@v3
       with:
-        path: $HOME/lmdb
-        key: ${{ runner.os }}-lmdb
+        path: influenza.fna.gz
+        key: influenza-fna
 
     # Install Dependencies
     - name: Install dependencies (Linux)
@@ -60,13 +60,16 @@ jobs:
     # Install Python dependencies
     - name: Install Python dependencies for Zstd dictionary training tool
       run: |
-        pip install typer rich
+        pip3 install typer rich
+    - name: Get NCBI influenza seq data
+      if: steps.cache-influenza-fna.outputs.cache-hit != 'true'
+      run: |
+        curl -SL https://ftp.ncbi.nih.gov/genomes/INFLUENZA/influenza.fna.gz -o influenza.fna.gz
     # Test
     - name: Test with NCBI influenza seq data
       run: |
-        curl -SL https://ftp.ncbi.nih.gov/genomes/INFLUENZA/influenza.fna.gz -o influenza.fna.gz
         # train zstd dictionary from 10000 sequences
-        zcat influenza.fna.gz | python ./train_zstd_dictionary_fasta_seqs.py --n-seqs 10000
+        zcat influenza.fna.gz | python3 ./train_zstd_dictionary_fasta_seqs.py --n-seqs 10000
         # create LMDB with zstd with dict compression of sequences
         zcat influenza.fna.gz | ./fasta2lmdb --dbpath flulmdb --zstdDict zstd_dictionary
         # get first 1000 seqids from fasta
