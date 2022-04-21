@@ -80,7 +80,7 @@ jobs:
         zcat influenza.fna.gz | grep '^>' | head -n$NSEQS | sed -E 's/^>gi\|[0-9]+\|gb\|(\w+)\|(.*)/\1/' > seqids.txt
         echo "Try get seqs in seqsids.txt from LMDB"
         ./fasta2lmdb fromLMDB --dbpath ./flulmdb --seqids seqids.txt > out.fasta
-        N=$(grep -c '^>')
+        N=$(grep -c '^>' out.fasta)
         ([[ 1000 -eq $N ]] && echo "Success!") || (echo "Expected 1000 entries in out.fasta, but only found $N" && false)
     - name: "Build and Copy release binary"
       run: nim c -d:release -o:bin/fasta2lmdb_${{ matrix.os }} fasta2lmdb
