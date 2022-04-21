@@ -4,14 +4,13 @@ import terminal
 import logging
 
 import bytesequtils
-import cligen
 import lmdb
 import zstd/compress
 import zstd/decompress
 # import from lib/klib.nim; must compile with -p:./lib
 import klib
 
-let VERSION = "0.2.1"
+let VERSION = "0.3.0"
 let INFO_DB_NAME = "info"
 let logger = newConsoleLogger(fmtStr="[$time] - $levelname: ", useStderr=true)
 
@@ -41,10 +40,16 @@ proc compressSeq(
   return s
 
 proc getHeader(name: string, comment: string): string =
-  var header = name & " " & comment
-  header = header.split('|', maxsplit=1)[0]
-  header = header.replace(' ', '_')
-  header = header.replace("hCoV-19/", "")
+  var header: string = ""
+  if comment != "":
+    header = name & " " & comment
+  else:
+    header = name
+  # special case for GISAID SARS-CoV-2 sequences
+  if header.startswith("hCoV-19/"):
+    header = header.replace("hCoV-19/", "")
+    header = header.split('|', maxsplit=1)[0]
+    header = header.replace(' ', '_')
   return header
 
 proc putSeq(dbenv: LMDBEnv, header: string, s: string) =
@@ -114,19 +119,34 @@ proc getZstdDict(dbenv: LMDBEnv): string =
     txn.abort()
     dbenv.close(dbi)
 
-proc getSeq(dbenv: LMDBEnv, seqid: string, dict: string = ""): string =
+proc areSeqsCompressed(dbenv: LMDBEnv): bool =
+  let txn = dbenv.newTxn()
+  let dbi = txn.dbiOpen(INFO_DB_NAME, 0)
+  try:
+    return txn.get(dbi, "is_compressed") == "true"
+  except Exception as ex:
+    stderr.writeLine(fmt"No Zstd dict could be read from LMDB. Error: {ex.msg} ({ex.name})")
+    return false
+  finally:
+    txn.abort()
+    dbenv.close(dbi)
+
+proc getSeq(dbenv: LMDBEnv, seqid: string, dict: string = "", isCompressed: bool = true): string =
   let txn = dbenv.newTxn()
   let dbi = txn.dbiOpen("", 0)
   try:
-    var compressedSeq = txn.get(dbi, seqid)
-    var dctx = new_decompress_context()
-    var decompressedSeq: seq[byte]
-    if dict != "":
-      decompressedSeq = decompress(dctx, compressedSeq, dict=dict)
+    if isCompressed:
+      var compressedSeq = txn.get(dbi, seqid)
+      var dctx = new_decompress_context()
+      var decompressedSeq: seq[byte]
+      if dict != "":
+        decompressedSeq = decompress(dctx, compressedSeq, dict=dict)
+      else:
+        decompressedSeq = decompress(dctx, compressedSeq)
+      discard free_context(dctx)
+      return toStrBuf(decompressedSeq)
     else:
-      decompressedSeq = decompress(dctx, compressedSeq)
-    discard free_context(dctx)
-    return toStrBuf(decompressedSeq)
+      return txn.get(dbi, seqid)
   except Exception as ex:
     stderr.writeLine(fmt"Could not get sequence for '{seqid}' from LMDB. Error: {ex.msg}")
     return ""
@@ -134,12 +154,20 @@ proc getSeq(dbenv: LMDBEnv, seqid: string, dict: string = ""): string =
     txn.abort()
     dbenv.close(dbi)
 
-proc writeFastaSeqToStdout(seqid: string, sequence: string) =
-  stdout.writeLine(fmt">{seqid}")
-  stdout.writeLine(sequence)
+proc writeFastaSeqToStdout(seqid: string, sequence: string): bool {.discardable.} =
+  if sequence != "":
+    stdout.writeLine(fmt">{seqid}")
+    stdout.writeLine(sequence)
+    return true
+  return false
 
-proc getLMDBSeqWriteToStdout(dbenv: LMDBEnv, seqid: string, dict: string) =
-  writeFastaSeqToStdout(seqid, getSeq(dbenv, seqid, dict))
+proc getLMDBSeqWriteToStdout(
+    dbenv: LMDBEnv,
+    seqid: string,
+    dict: string,
+    isCompressed: bool = true
+  ): bool {.discardable.} =
+  return writeFastaSeqToStdout(seqid, getSeq(dbenv, seqid, dict, isCompressed))
 
 proc toLMDB(
     dbpath: string, 
@@ -212,39 +240,61 @@ proc toLMDB(
   logger.log(lvlInfo, fmt"Read {count} records!")
   logger.log(lvlInfo, "DONE!")
 
-proc fasta2lmdb(
-    dbpath="./gisaidseqs", 
+proc intoLMDB(
+    dbpath="./seqslmdb",
     mapSize: uint = 10485760 * 1024, 
     overwriteDB = false,
-    seqids = "",
     zstdDict = "",
     compressSeqs: bool = true) =
-  ## Read FASTA records from stdin into LMDB key-value database or get sequences from LMDB
+  ## Read FASTA records from stdin into LMDB key-value database
   ##
-  ## Expected usage to create an LMDB DB from a FASTA piped into fasta2lmdb:
+  ## Example usage to create an LMDB DB from GISAID SARS-CoV-2 FASTA sequences piped into fasta2lmdb:
   ##
-  ## $ pixz -d < sequences_fasta_YYYY_mm_dd.tar.xz | tar -xOf - sequences.fasta | fasta2lmdb --dbpath ./gisaidseqs
+  ## $ pixz -d < sequences_fasta_YYYY_mm_dd.tar.xz | tar -xOf - sequences.fasta | fasta2lmdb intoLMDB --dbpath ./gisaidseqslmdb --zstdDict sars-cov-2-zstd-dictionary
   ##
   ## NOTE: train a Zstd dictionary on your sequences for better and faster compression and decompression of your sequences!
+  if not isatty(stdin):
+    toLMDB(dbpath, zstdDict, mapSize, overwriteDB, compressSeqs)
+
+proc fromLMDB(
+    dbpath: string,
+    seqids = "",
+  ) =
+  ## Get sequences from LMDB created by fasta2lmdb
   ##
   ## Expected usage to retrieve sequences from LMDB DB to stdout:
   ##
-  ## $ fasta2lmdb --dbpath /path/to/gisaidseqs --seqids seqids.txt > seqs.fasta
+  ## $ fasta2lmdb fromLMDB --dbpath /path/to/gisaidseqs --seqids seqids.txt > seqs.fasta
   ##
   ## where "seqids.txt" contains sequence IDs to retrieve; one per line
-  if not isatty(stdin):
-    toLMDB(dbpath, zstdDict, mapSize, overwriteDB, compressSeqs)
-  else:
-    if not seqids.fileExists():
+  if not seqids.fileExists():
       raise newException(Exception, fmt"No stdin stream present and file with sequence IDs ('{seqids}') does not exist!")
-    logger.log(lvlInfo, fmt"Start fetch sequences from LMDB '{dbpath}' with IDs in '{seqids}'")
-    let dbenv = newLMDBEnv(dbpath, maxdbs=10)
-    let dict = getZstdDict(dbenv)
-    for line in seqids.lines:
-      if line == "":
-        continue
-      getLMDBSeqWriteToStdout(dbenv, line, dict)
-    dbenv.envClose()
-    logger.log(lvlInfo, "DONE!")
+  logger.log(lvlInfo, fmt"Start fetch sequences from LMDB '{dbpath}' with IDs in '{seqids}'")
+  let dbenv = newLMDBEnv(dbpath, maxdbs=10)
+  let dict = getZstdDict(dbenv)
+  let compressed = areSeqsCompressed(dbenv)
+  var count: int = 0
+  for line in seqids.lines:
+    if line == "":
+      continue
+    if getLMDBSeqWriteToStdout(dbenv, line, dict, compressed):
+      count += 1
+  logger.log(lvlInfo, fmt"Wrote {count} sequences to stdout.")
+  dbenv.envClose()
+  logger.log(lvlInfo, "DONE!")
 
-dispatch(fasta2lmdb)
+when isMainModule:
+  import cligen
+  clCfg.version = VERSION
+  dispatchMulti(
+    [intoLMDB, help={
+      "dbpath": "Path to LMDB. If does not exist, it will be created. If it does exist, new sequences will be saved to it.",
+      "overwriteDB": "Overwrite LMDB? This will delete any existing LMDB.",
+      "zstdDict": "Path to Zstd dictionary file trained on similar sequences. A Zstd is highly recommended for better and faster compression and decompression.",
+      "mapSize": "Max LMDB size. Default to 10GB. May need to be adjusted depending on size of input and whether the sequences will be compressed or not.",
+      "compressSeqs": "Compress sequences saved to LMDB?",
+    }],
+    [fromLMDB, help={
+      "dbpath": "Path to LMDB created with fasta2lmdb",
+      "seqids": "File with list of sequence IDs to retrieve from LMDB",
+    }])

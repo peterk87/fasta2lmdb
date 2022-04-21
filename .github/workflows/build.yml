@@ -2,22 +2,28 @@
 name: Build
 
 on:
-  - push
-  - pull_request
+  push:
+    branches:
+      - master
+      - dev
+  pull_request:
+    branches:
+      - '*'
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-18.04, ubuntu-latest]
+        os: [ubuntu-latest]
         version:
           - stable
           - devel
-
+    defaults:
+      run:
+        shell: bash -l {0}
     steps:
     - uses: actions/checkout@v2
-
     # Caching
     - name: Cache choosenim
       id: cache-choosenim
@@ -25,42 +31,62 @@ jobs:
       with:
         path: ~/.choosenim
         key: ${{ runner.os }}-choosenim-stable
-
     - name: Cache nimble
       id: cache-nimble
       uses: actions/cache@v3
       with:
         path: ~/.nimble
         key: ${{ runner.os }}-nimble-stable
-
-    - name: Cache LMDB
-      id: cache-lmdb
+    - name: Cache influenza.fna.gz
+      id: cache-influenza-fna
       uses: actions/cache@v3
       with:
-        path: $HOME/lmdb
-        key: ${{ runner.os }}-lmdb
-
+        path: influenza.fna.gz
+        key: influenza-fna
     # Install Dependencies
     - name: Install dependencies (Linux)
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get -qy install make build-essential curl libtool autoconf zlib1g-dev liblmdb-dev
-
+        sudo apt-get -qy install make build-essential curl libtool autoconf zlib1g-dev liblmdb-dev gzip zstd grep upx binutils
     # Install Nim and Nimble
     - uses: iffy/install-nim@v4.1.1
       with:
         version: ${{ matrix.version }}
-
     # Build
     - name: Build executable
       run: |
         nimble build --verbose -Y
-        ./fasta2lmdb -h
-
-    - name: "Build and Copy release binary"
-      run: nim c -d:release -o:bin/fasta2lmdb_${{ matrix.os }} fasta2lmdb
-
+        ./fasta2lmdb help
+    # Install Python dependencies
+    - name: Install Python dependencies for Zstd dictionary training tool
+      run: |
+        pip3 install typer rich
+    - name: Get NCBI influenza seq data
+      if: steps.cache-influenza-fna.outputs.cache-hit != 'true'
+      run: |
+        curl -SL https://ftp.ncbi.nih.gov/genomes/INFLUENZA/influenza.fna.gz -o influenza.fna.gz
+    # Test
+    - name: Test with NCBI influenza seq data
+      run: |
+        echo "Train zstd dictionary from 10000 sequences"
+        zcat influenza.fna.gz | python3 ./train_zstd_dictionary_fasta_seqs.py --n-seqs 10000
+        echo
+        echo "Create LMDB with zstd with dict compression of sequences"
+        zcat influenza.fna.gz | sed -E 's/^>gi\|[0-9]+\|gb\|(\w+)\|(.*)/>\1/' | ./fasta2lmdb intoLMDB --dbpath flulmdb --zstdDict zstd_dictionary
+        echo
+        NSEQS=1000
+        echo "Get first $NSEQS seqids from fasta"
+        zcat influenza.fna.gz | grep '^>' | head -n$NSEQS | sed -E 's/^>gi\|[0-9]+\|gb\|(\w+)\|(.*)/\1/' > seqids.txt
+        echo "Try get seqs in seqsids.txt from LMDB"
+        ./fasta2lmdb fromLMDB --dbpath ./flulmdb --seqids seqids.txt > out.fasta
+        N=$(grep -c '^>' out.fasta)
+        ([[ 1000 -eq $N ]] && echo "Success!") || (echo "Expected 1000 entries in out.fasta, but only found $N" && false)
+    - name: "Build and Copy release statically linked binary"
+      run: |
+        nim c -d:staticUbuntu -o:bin/fasta2lmdb_${{ matrix.os }} fasta2lmdb
+        strip -s bin/fasta2lmdb_${{ matrix.os }}
+        upx --best bin/fasta2lmdb_${{ matrix.os }}
     - name: Upload Artifact
       if: success()
       uses: actions/upload-artifact@v1.0.0
